@@ -1,5 +1,10 @@
 
-enum SIDE {LEFT, RIGHT, BOTH};
+enum SIDE {LEFT, RIGHT, BOTH};  // where to puff from
+
+// msg is received in 2 bytes: first is the msg type, then the msg data containing the load
+// the load is in microliters for DISPENSE, and in ms for the puffs
+enum MSG_TYPE {NOP, PREFEED, DISPENSE, LEFT_PUFF, RIGHT_PUFF, BOTH_PUFF};
+const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data is ignored
 
 const int LPIN = 3, RPIN = 4;  // L/R puff drive: green, yellow
 const int STBY = 2;  // puff enable: orange
@@ -24,6 +29,7 @@ void off() {
   delay(10);
 }
 
+
 void puff(SIDE s, int t) {
   if (s == LEFT || s == BOTH)
     digitalWrite(LPIN, HIGH);
@@ -35,6 +41,7 @@ void puff(SIDE s, int t) {
   digitalWrite(LPIN, LOW);
   digitalWrite(RPIN, LOW);
 }
+
 
 void dispense(float ul) {  // in microliters
   dispense_by_t(ul * UL_PER_MS);
@@ -66,6 +73,70 @@ float calibrate_dispenser() {
   }
 }
 
+
+int read_msg_data() {
+  
+  int data_read_counter = 0;
+  while (Serial.available() == 0 && data_read_counter < DATA_WAIT_LIMIT) {
+    delay(1);
+    data_read_counter += 1;
+  }
+
+  if (data_read_counter >= DATA_WAIT_LIMIT)
+    return 0;  // error
+
+  return Serial.read();
+  
+}
+
+
+void proc_msg() {
+
+  MSG_TYPE msg_type = NOP;
+  int msg_data = 0;
+  
+  if (Serial.available() > 0) {
+
+    msg_type = Serial.read();
+    msg_data = read_msg_data();  // even NOP needs to have a load
+
+    if (msg_data == 0)
+      return;  // error
+    
+    switch (msg_type) {
+
+      case PREFEED:
+        prefeed_tube(6, );  // thick tube
+        prefeed_tube(2, );  // tiny tube
+        break;
+      
+      case DISPENSE:
+        dispense(msg_data);
+        break;
+
+      case LEFT_PUFF:
+        on();
+        puff(LEFT, msg_data);
+        off();
+        break;
+
+      case RIGHT_PUFF:
+        on();
+        puff(RIGHT, msg_data);
+        off();
+        break;
+
+      case BOTH_PUFF:
+        on();
+        puff(BOTH, msg_data);
+        off();
+        break;
+    }
+  }
+  
+}
+
+
 void setup() {
   
   pinMode(LPIN, OUTPUT);
@@ -78,21 +149,15 @@ void setup() {
   digitalWrite(STBY, LOW);
   digitalWrite(VPIN, LOW);
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   
 }
 
+
 void loop() {
+
+  // calibrate_dispenser();
+
   
-  calibrate_dispenser();
   
-//  on();
-//  Serial.println("L");
-//  puff(BOTH, 2000);
-//  delay(1000);
-//  
-//  Serial.println("R");
-//  puff(RIGHT, 2000);
-//  off();
-//  delay(1000);
 }
