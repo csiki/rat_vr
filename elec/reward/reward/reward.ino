@@ -3,10 +3,10 @@ enum SIDE {LEFT, RIGHT, BOTH};  // where to puff from
 
 // msg is received in 2 bytes: first is the msg type, then the msg data containing the load
 // the load is in microliters for DISPENSE, and in ms for the puffs
-enum MSG_TYPE {NOP, PREFEED, DISPENSE, LEFT_PUFF, RIGHT_PUFF, BOTH_PUFF};
-const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data is ignored
+enum MSG_TYPE {NOP = 0, PREFEED = 1, DISPENSE = 2, LEFT_PUFF = 3, RIGHT_PUFF = 4, BOTH_PUFF = 5};
+const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data part of the msg is ignored
 
-const int LPIN = 3, RPIN = 4;  // L/R puff drive: green, yellow
+const int LPIN = 4, RPIN = 3;  // L/R puff drive: green, yellow
 const int STBY = 2;  // puff enable: orange
 const int VPIN = 5;  // water reward valve pin
 
@@ -83,56 +83,52 @@ int read_msg_data() {
   }
 
   if (data_read_counter >= DATA_WAIT_LIMIT)
-    return 0;  // error
+    return -1;  // error
 
   return Serial.read();
   
 }
 
 
-void proc_msg() {
+MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
-  MSG_TYPE msg_type = NOP;
-  int msg_data = 0;
+  int msg_data = read_msg_data();  // even NOP needs to have a load
+
+  if (msg_type == NOP || msg_data == -1)
+    return NOP;  // skip
   
-  if (Serial.available() > 0) {
+  switch (msg_type) {
 
-    msg_type = Serial.read();
-    msg_data = read_msg_data();  // even NOP needs to have a load
-
-    if (msg_data == 0)
-      return;  // error
+    case PREFEED:
+      prefeed_tube(6, 533);  // thick tube: 21" = 533mm
+      prefeed_tube(2, 100);  // short tiny tube: <4" = 100mm
+      prefeed_tube(2, 647);  // long tiny tube: 23" 1/4 = 647mm
+      break;
     
-    switch (msg_type) {
+    case DISPENSE:
+      dispense(msg_data);
+      break;
 
-      case PREFEED:
-        prefeed_tube(6, );  // thick tube
-        prefeed_tube(2, );  // tiny tube
-        break;
-      
-      case DISPENSE:
-        dispense(msg_data);
-        break;
+    case LEFT_PUFF:
+      on();
+      puff(LEFT, msg_data);
+      off();
+      break;
 
-      case LEFT_PUFF:
-        on();
-        puff(LEFT, msg_data);
-        off();
-        break;
+    case RIGHT_PUFF:
+      on();
+      puff(RIGHT, msg_data);
+      off();
+      break;
 
-      case RIGHT_PUFF:
-        on();
-        puff(RIGHT, msg_data);
-        off();
-        break;
-
-      case BOTH_PUFF:
-        on();
-        puff(BOTH, msg_data);
-        off();
-        break;
-    }
+    case BOTH_PUFF:
+      on();
+      puff(BOTH, msg_data);
+      off();
+      break;
   }
+
+  return msg_type;
   
 }
 
@@ -152,12 +148,53 @@ void setup() {
   Serial.begin(115200);
   
 }
-
+int ccc = 0;
 
 void loop() {
 
   // calibrate_dispenser();
+  // test puffs
+  //on();
+  //Serial.println("left");
+  //puff(LEFT, 1000);
+  //delay(500);
+  //Serial.println("right");
+  //puff(RIGHT, 1000);
+  //delay(500);
+  //Serial.println("both");
+  //puff(BOTH, 1000);
+  //off();
 
+  // test prefeed
+//  if (ccc == 0) {
+//    
+//    Serial.println("thick tube start");
+//    prefeed_tube(6, 533);  // thick tube: 21" = 533mm
+//    Serial.println("thick tube done");
+//    delay(8000);
+//
+//    Serial.println("smol tube start");
+//    prefeed_tube(2, 100);  // short tiny tube: <4" = 100mm
+//    Serial.println("smol tube done");
+//    delay(8000);
+//
+//    Serial.println("smol tube2 start");
+//    prefeed_tube(2, 647);  // long tiny tube: 23" 1/4 = 647mm
+//    Serial.println("smol tube2 done");
+//    delay(8000);
+//    
+//    ccc += 1;
+//  }
+
+  //dispense(50);
   
+  //delay(500);
+
+  // run
+  if (Serial.available() > 0) {
+    MSG_TYPE msg_type = (MSG_TYPE) Serial.read();
+    msg_type = proc_msg(msg_type);
+    Serial.println(msg_type);  // return received msg to master
+  }
   
 }

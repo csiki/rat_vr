@@ -2,6 +2,13 @@
 enum ROLLER {FORWARD_BACKWARD = 0, LEFT_RIGHT = 1};
 enum DIRECTION {BACKWARD = 0, FORWARD = 1, LEFT = 0, RIGHT = 1};
 
+// msg is received in 3 bytes: first is the msg type, then the msg data containing the load
+// the load is 2 bytes, first byte the high portion:
+//   PULL_TO_BASE load is ignored, lin extension/contraction, rolling, solenoid pull loads are in ms
+enum MSG_TYPE {NOP = 0, GET_BTN_STATE = 1, PULL_TO_BASE = 2, EXTEND_LIN = 3, CONTRACT_LIN = 4,
+               ROLL_FORWARD = 5, ROLL_BACKWARD = 6, ROLL_LEFT = 7, ROLL_RIGHT = 8, PULL_SOL = 9};
+const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data part of the msg is ignored
+
 // roller stuff
 typedef struct {
   const int lin1, lin2;  // lin act: grey, white (Ain1, Ain2)
@@ -15,6 +22,8 @@ roller_t ROLLERS[] = {{lin1: 5, lin2: 4, min1: 6, min2: 7, pwmm: 3, stby: 2, lin
                       {lin1: 11, lin2: 10, min1: 12, min2: 13, pwmm: 9, stby: 8, lin_state: 0}};  // left-right (yaw)
 
 const int MAX_LIN_EXT = 4000, MAX_LIN_INACC = 200;
+const int FB_EXT = 2600, LR_EXT = 1450;
+const int MAX_LIN_PRAC_EXT = max(FB_EXT, LR_EXT) + MAX_LIN_INACC;
 
 
 // pull solenoid & button analog input pins
@@ -90,7 +99,7 @@ void roll_mot(ROLLER r, DIRECTION d, int t) {  // no pwm
 }
 
 void pull_to_base(ROLLER r) {
-  int by = min(MAX_LIN_EXT, max(0, ROLLERS[r].lin_state) + MAX_LIN_INACC);
+  int by = min(MAX_LIN_PRAC_EXT, max(0, ROLLERS[r].lin_state) + MAX_LIN_INACC);
   roll_lin(r, BACKWARD, by);
   ROLLERS[r].lin_state = 0;
 }
@@ -111,9 +120,68 @@ void test_roller(ROLLER r, int t) {
 }
 
 
+int read_msg_data() {
+  
+  int data_read_counter = 0;
+  while (Serial.available() == 0 && data_read_counter < DATA_WAIT_LIMIT) {
+    delay(1);
+    data_read_counter += 1;
+  }
+
+  if (data_read_counter >= DATA_WAIT_LIMIT)
+    return -1;  // error
+
+  return Serial.read();
+  
+}
+
+
+MSG_TYPE proc_msg(MSG_TYPE msg_type) {
+
+  int msg_data = read_msg_data() << 8;  // even NOP needs to have a load
+  msg_data |= read_msg_data();  // second byte is the lowest
+
+  if (msg_data == -1)
+    return NOP;  // skip
+  
+  switch (msg_type) {
+
+    case GET_BTN_STATE:  // TODO
+      break;
+
+    case PULL_TO_BASE:
+      break;
+    
+    case EXTEND_LIN:
+      break;
+
+    case CONTRACT_LIN:
+      break;
+
+    case ROLL_FORWARD:
+      break;
+
+    case ROLL_BACKWARD:
+      break;
+
+    case ROLL_LEFT:
+      break;
+
+    case ROLL_RIGHT:
+      break;
+
+    case PULL_SOL:
+      break;
+  }
+
+  return msg_type;
+  
+}
+
+
 void setup() {
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   
   for (int r = FORWARD_BACKWARD; r <= LEFT_RIGHT; ++r) {
 
@@ -138,9 +206,9 @@ void setup() {
     digitalWrite(SOL_PIN, LOW);
 
     // pull linear actuator back fully
-    Serial.println("pull to base");
+    //Serial.println("pull to base");
     on((ROLLER) r);
-    ROLLERS[r].lin_state = MAX_LIN_EXT;
+    ROLLERS[r].lin_state = MAX_LIN_PRAC_EXT;
     pull_to_base((ROLLER) r);  // to 0 state
     off((ROLLER) r);
 
@@ -149,16 +217,22 @@ void setup() {
 
 
 void loop() {
+
+  if (Serial.available() > 0) {
+    MSG_TYPE msg_type = (MSG_TYPE) Serial.read();
+    msg_type = proc_msg(msg_type);
+    Serial.println(msg_type);  // return received msg to master
+  }
   
-  //test_roller(FORWARD_BACKWARD, 2500);
-  //test_roller(LEFT_RIGHT, 1500);
+  //test_roller(FORWARD_BACKWARD, FB_EXT);
+  //test_roller(LEFT_RIGHT, LR_EXT);
   
   //Serial.println("solenoid pull");
   //sol_pull(2000);
   //delay(2000);
 
-  BTN_STATE = digitalRead(BTN_PIN);
-  Serial.println(BTN_STATE);
-  delay(50);
+  //BTN_STATE = digitalRead(BTN_PIN);
+  //Serial.println(BTN_STATE);
+  //delay(50);
   
 }
