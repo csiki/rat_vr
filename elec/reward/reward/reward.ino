@@ -1,9 +1,12 @@
 
 enum SIDE {LEFT, RIGHT, BOTH};  // where to puff from
+const byte DEVICE_ID = 2;
 
-// msg is received in 2 bytes: first is the msg type, then the msg data containing the load
-// the load is in microliters for DISPENSE, and in ms for the puffs
-enum MSG_TYPE {NOP = 0, PREFEED = 1, DISPENSE = 2, LEFT_PUFF = 3, RIGHT_PUFF = 4, BOTH_PUFF = 5};
+// msg is received in 2 bytes: first is the msg type, then the msg data containing the load,
+//   the load is in microliters for DISPENSE, and in ms for the puffs
+// the received/processed msg type id is written back to serial after any kind of returned load
+enum MSG_TYPE {NOP = 0, GET_DEV_ID = 1, PREFEED = 2, DISPENSE = 3,
+               LEFT_PUFF = 4, RIGHT_PUFF = 5, BOTH_PUFF = 6};
 const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data part of the msg is ignored
 
 const int LPIN = 4, RPIN = 3;  // L/R puff drive: green, yellow
@@ -94,11 +97,15 @@ MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
   int msg_data = read_msg_data();  // even NOP needs to have a load
 
-  if (msg_type == NOP || msg_data == -1)
+  if (msg_data == -1)  // data load reading error
     return NOP;  // skip
   
   switch (msg_type) {
 
+    case GET_DEV_ID:
+      Serial.write(DEVICE_ID);
+      break;
+    
     case PREFEED:
       prefeed_tube(6, 533);  // thick tube: 21" = 533mm
       prefeed_tube(2, 100);  // short tiny tube: <4" = 100mm
@@ -134,6 +141,8 @@ MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
 
 void setup() {
+
+  Serial.begin(115200);
   
   pinMode(LPIN, OUTPUT);
   pinMode(RPIN, OUTPUT);
@@ -144,14 +153,19 @@ void setup() {
   digitalWrite(RPIN, LOW);
   digitalWrite(STBY, LOW);
   digitalWrite(VPIN, LOW);
-
-  Serial.begin(115200);
   
 }
-int ccc = 0;
+
 
 void loop() {
 
+  // run
+  if (Serial.available() > 0) {
+    MSG_TYPE msg_type = (MSG_TYPE) Serial.read();
+    msg_type = proc_msg(msg_type);
+    Serial.write((byte) msg_type);  // return received msg to master
+  }
+  
   // calibrate_dispenser();
   // test puffs
   //on();
@@ -189,12 +203,5 @@ void loop() {
   //dispense(50);
   
   //delay(500);
-
-  // run
-  if (Serial.available() > 0) {
-    MSG_TYPE msg_type = (MSG_TYPE) Serial.read();
-    msg_type = proc_msg(msg_type);
-    Serial.println(msg_type);  // return received msg to master
-  }
   
 }

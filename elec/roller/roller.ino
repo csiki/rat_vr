@@ -1,12 +1,16 @@
 
 enum ROLLER {FORWARD_BACKWARD = 0, LEFT_RIGHT = 1};
 enum DIRECTION {BACKWARD = 0, FORWARD = 1, LEFT = 0, RIGHT = 1};
+const byte DEVICE_ID = 1;
 
 // msg is received in 3 bytes: first is the msg type, then the msg data containing the load
-// the load is 2 bytes, first byte the high portion:
-//   PULL_TO_BASE load is ignored, lin extension/contraction, rolling, solenoid pull loads are in ms
-enum MSG_TYPE {NOP = 0, GET_BTN_STATE = 1, PULL_TO_BASE = 2, EXTEND_LIN = 3, CONTRACT_LIN = 4,
-               ROLL_FORWARD = 5, ROLL_BACKWARD = 6, ROLL_LEFT = 7, ROLL_RIGHT = 8, PULL_SOL = 9};
+// the load is 3 bytes, first byte is separate, second and two bytes are concatenated MSB first:
+//   PULL_TO_BASE load is ignored; lin extension/contraction, and solenoid pull loads are in ms and first byte is ignored
+//   motor rolls get speed (0-255) as first byte and time to roll in ms as the concat of last two bytes
+// the received/processed msg type id is written back to serial after any kind of returned load
+enum MSG_TYPE {NOP = 0, GET_DEV_ID = 1, GET_BTN_STATE = 2, PULL_TO_BASE = 3, EXTEND_FB_LIN = 4, CONTRACT_FB_LIN = 5,
+               EXTEND_LR_LIN = 6, CONTRACT_LR_LIN = 7, ROLL_FORWARD = 8, ROLL_BACKWARD = 9,
+               ROLL_LEFT = 10, ROLL_RIGHT = 11, PULL_SOL = 12};
 const int DATA_WAIT_LIMIT = 1000;  // ~ms, after this, data part of the msg is ignored
 
 // roller stuff
@@ -22,7 +26,7 @@ roller_t ROLLERS[] = {{lin1: 5, lin2: 4, min1: 6, min2: 7, pwmm: 3, stby: 2, lin
                       {lin1: 11, lin2: 10, min1: 12, min2: 13, pwmm: 9, stby: 8, lin_state: 0}};  // left-right (yaw)
 
 const int MAX_LIN_EXT = 4000, MAX_LIN_INACC = 200;
-const int FB_EXT = 2600, LR_EXT = 1450;
+const int FB_EXT = 800, LR_EXT = 1100;
 const int MAX_LIN_PRAC_EXT = max(FB_EXT, LR_EXT) + MAX_LIN_INACC;
 
 
@@ -33,7 +37,7 @@ int BTN_STATE = 0;
 
 
 // pull solenoid & button functions
-void sol_pull(int keep) {
+void sol_pull(int keep_t) {  // keep in pulled position in ms
   
   const int state_t = 150;  // ms
   const int nstate = 20;
@@ -56,19 +60,20 @@ void sol_pull(int keep) {
     }
   }
 
-  delay(keep);
+  delay(keep_t);
+  digitalWrite(SOL_PIN, LOW);  // back to ernyett
 }
 
 
 // roller functions
 void on(ROLLER r) {
   digitalWrite(ROLLERS[r].stby, HIGH);
-  delay(10);
+  delay(1);
 }
 
 void off(ROLLER r) {
   digitalWrite(ROLLERS[r].stby, LOW);
-  delay(10);
+  delay(1);
 }
 
 void roll(int in1, int in2, DIRECTION d, int t) {
@@ -86,7 +91,7 @@ void roll(int in1, int in2, DIRECTION d, int t) {
   }
 }
 
-void roll_lin(ROLLER r, DIRECTION d, int t) {
+void drive_lin(ROLLER r, DIRECTION d, int t) {
   roll(ROLLERS[r].lin1, ROLLERS[r].lin2, d, t);
   ROLLERS[r].lin_state = max(0, ROLLERS[r].lin_state + (d * 2 - 1) * t);
   // Serial.println(ROLLERS[r].lin_state);
@@ -98,21 +103,27 @@ void roll_mot(ROLLER r, DIRECTION d, int t) {  // no pwm
   digitalWrite(ROLLERS[r].pwmm, LOW);
 }
 
+void prec_roll_mot(ROLLER r, DIRECTION d, byte sp, int t) {
+  analogWrite(ROLLERS[r].pwmm, sp);
+  roll(ROLLERS[r].min1, ROLLERS[r].min2, d, t);
+  digitalWrite(ROLLERS[r].pwmm, LOW);
+}
+
 void pull_to_base(ROLLER r) {
   int by = min(MAX_LIN_PRAC_EXT, max(0, ROLLERS[r].lin_state) + MAX_LIN_INACC);
-  roll_lin(r, BACKWARD, by);
+  drive_lin(r, BACKWARD, by);
   ROLLERS[r].lin_state = 0;
 }
 
 void test_roller(ROLLER r, int t) {
   on(r);
   
-  roll_lin(r, FORWARD, t);
+  drive_lin(r, FORWARD, t);
   
   roll_mot(r, BACKWARD, 1500);
   roll_mot(r, FORWARD, 1000);
   
-  roll_lin(r, BACKWARD, t);
+  drive_lin(r, BACKWARD, t);
   
   pull_to_base(r);
   
@@ -138,39 +149,82 @@ int read_msg_data() {
 
 MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
-  int msg_data = read_msg_data() << 8;  // even NOP needs to have a load
-  msg_data |= read_msg_data();  // second byte is the lowest
+  byte msg_data1 = read_msg_data();  // even NOP needs to have a load
+  int msg_data2 = read_msg_data() << 8;  // MSB first
+  msg_data2 |= read_msg_data();
 
-  if (msg_data == -1)
+  if (msg_data2 == -1)  // data load reading error; msg_data1 can be -1 (=255)
     return NOP;  // skip
   
   switch (msg_type) {
 
-    case GET_BTN_STATE:  // TODO
+    case GET_DEV_ID:
+      Serial.write(DEVICE_ID);
+      break;
+    
+    case GET_BTN_STATE:
+      Serial.write((byte) digitalRead(BTN_PIN));
       break;
 
     case PULL_TO_BASE:
+      for (int r = FORWARD_BACKWARD; r <= LEFT_RIGHT; ++r) {
+        on((ROLLER) r);
+        ROLLERS[r].lin_state = MAX_LIN_PRAC_EXT;
+        pull_to_base((ROLLER) r);  // to 0 state
+        off((ROLLER) r);
+      }
       break;
     
-    case EXTEND_LIN:
+    case EXTEND_FB_LIN:
+      on(FORWARD_BACKWARD);
+      drive_lin(FORWARD_BACKWARD, FORWARD, msg_data2);
+      off(FORWARD_BACKWARD);
       break;
 
-    case CONTRACT_LIN:
+    case CONTRACT_FB_LIN:
+      on(FORWARD_BACKWARD);
+      drive_lin(FORWARD_BACKWARD, BACKWARD, msg_data2);
+      off(FORWARD_BACKWARD);
+      break;
+
+    case EXTEND_LR_LIN:
+      on(LEFT_RIGHT);
+      drive_lin(LEFT_RIGHT, FORWARD, msg_data2);
+      off(LEFT_RIGHT);
+      break;
+
+    case CONTRACT_LR_LIN:
+      on(LEFT_RIGHT);
+      drive_lin(LEFT_RIGHT, BACKWARD, msg_data2);
+      off(LEFT_RIGHT);
       break;
 
     case ROLL_FORWARD:
+      on(FORWARD_BACKWARD);
+      prec_roll_mot(FORWARD_BACKWARD, FORWARD, msg_data1, msg_data2);
+      off(FORWARD_BACKWARD);
       break;
 
     case ROLL_BACKWARD:
+      on(FORWARD_BACKWARD);
+      prec_roll_mot(FORWARD_BACKWARD, BACKWARD, msg_data1, msg_data2);
+      off(FORWARD_BACKWARD);
       break;
 
     case ROLL_LEFT:
+      on(LEFT_RIGHT);
+      prec_roll_mot(LEFT_RIGHT, LEFT, msg_data1, msg_data2);
+      off(LEFT_RIGHT);
       break;
 
     case ROLL_RIGHT:
+      on(LEFT_RIGHT);
+      prec_roll_mot(LEFT_RIGHT, RIGHT, msg_data1, msg_data2);
+      off(LEFT_RIGHT);
       break;
 
     case PULL_SOL:
+      sol_pull(msg_data2);
       break;
   }
 
@@ -221,7 +275,7 @@ void loop() {
   if (Serial.available() > 0) {
     MSG_TYPE msg_type = (MSG_TYPE) Serial.read();
     msg_type = proc_msg(msg_type);
-    Serial.println(msg_type);  // return received msg to master
+    Serial.write((byte) msg_type);  // return received msg to master
   }
   
   //test_roller(FORWARD_BACKWARD, FB_EXT);
