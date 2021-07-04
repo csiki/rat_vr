@@ -2,6 +2,7 @@ import sys, os
 import serial
 import glob
 import time
+from pprint import pprint
 
 from utils import *
 import reward
@@ -63,10 +64,16 @@ if __name__ == '__main__':
     ports = [serial.Serial(pid, **port_settings) for pid in port_ids]
     time.sleep(3)  # wait for setup
 
-    devs = {get_dev_id(port): port.name for port in ports}
+    devs = {get_dev_id(port): port for port in ports}
     roller_dev = devs[roller_dev_id]
     reward_dev = devs[reward_dev_id]
+    pprint(devs)
 
-    
+    # roller.roll(roller_dev, 'l', 100, 1000)
+    # roller.roll(roller_dev, 'r', 150, 1000)
+    # roller.roll(roller_dev, 'l', 200, 1000)
+    # roller.roll(roller_dev, 'r', 255, 1000)
 
-    print(devs)
+    reward.puff(reward_dev, 'l', 255)
+    reward.puff(reward_dev, 'r', 255)
+    reward.puff(reward_dev, 'b', 255)
