@@ -95,7 +95,10 @@ int read_msg_data() {
 
 MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
-  int msg_data = read_msg_data();  // even NOP needs to have a load
+  int msg_data = 0;
+  if (msg_type != GET_DEV_ID) {  // has to be universal between devices, no load
+    msg_data = read_msg_data();  // even NOP needs to have a load
+  }
 
   if (msg_data == -1)  // data load reading error
     return NOP;  // skip

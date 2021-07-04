@@ -149,9 +149,13 @@ int read_msg_data() {
 
 MSG_TYPE proc_msg(MSG_TYPE msg_type) {
 
-  byte msg_data1 = read_msg_data();  // even NOP needs to have a load
-  int msg_data2 = read_msg_data() << 8;  // MSB first
-  msg_data2 |= read_msg_data();
+  byte msg_data1 = 0;
+  int msg_data2 = 0;
+  if (msg_type != GET_DEV_ID) {  // has to be universal between devices, no load
+    msg_data1 = read_msg_data();  // even NOP needs to have a load
+    msg_data2 = read_msg_data() << 8;  // MSB first
+    msg_data2 |= read_msg_data();
+  }
 
   if (msg_data2 == -1)  // data load reading error; msg_data1 can be -1 (=255)
     return NOP;  // skip
@@ -260,11 +264,11 @@ void setup() {
     digitalWrite(SOL_PIN, LOW);
 
     // pull linear actuator back fully
-    //Serial.println("pull to base");
-    on((ROLLER) r);
-    ROLLERS[r].lin_state = MAX_LIN_PRAC_EXT;
-    pull_to_base((ROLLER) r);  // to 0 state
-    off((ROLLER) r);
+    // now this part is requested by the controller to decrease startup time
+    //on((ROLLER) r);
+    //ROLLERS[r].lin_state = MAX_LIN_PRAC_EXT;
+    //pull_to_base((ROLLER) r);  // to 0 state
+    //off((ROLLER) r);
 
   }
 }
